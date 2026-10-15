@@ -807,6 +807,10 @@ describe('auditStartupEntries', () => {
           Error: listen EADDRINUSE: address already in use 127.0.0.1:3080
               at Server.listen (node:net:1:2)
 
+      Hint: a required service could not bind its port because another process already holds it.
+      That is normally a duplicate launch of the same command (an instance is already running),
+      not a broken installation. Use the running instance, or start this one on a different port.
+
       Plugins waiting for services (3):
         Plugin                  Missing services
         web-runtime (required)  webServer

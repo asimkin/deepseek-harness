@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { inspect } from 'node:util'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { StartupError } from '@deepseek-ai/dsh-app-boot'
-import { reportStartupFailure } from '../src/startup-diagnostics.ts'
+import { redactArgv, reportStartupFailure } from '../src/startup-diagnostics.ts'
 
 async function home(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-startup-diagnostics-'))
@@ -136,5 +136,17 @@ describe('startup diagnostic files', () => {
     expect(output).toContain('CUSTOM')
     expect(output).not.toContain('Full diagnostics: ')
     expect(await readFile(join(dir, 'logs'), 'utf8')).toBe('blocked')
+  })
+
+  it('records the launcher argv with credential values redacted, plus the parent pid', async () => {
+    const dir = await home()
+    await reportStartupFailure(startupError('failed'), { home: dir, version: '1.2.3', profile: 'web' }, () => {})
+    const files = await readdir(join(dir, 'logs'))
+    const report = await readFile(join(dir, 'logs', files[0]!), 'utf8')
+    expect(report).toContain('argv:')
+    expect(report).toContain(`ppid: ${String(process.ppid)}`)
+    expect(redactArgv(['dsh', 'web', '--api-key', 'sk-live-value', '--token=abc', '--port', '3080']))
+      .toEqual(['dsh', 'web', '--api-key', '<redacted>', '--token=<redacted>', '--port', '3080'])
+    expect(redactArgv(['dsh', 'headless', '--port', '3080'])).toEqual(['dsh', 'headless', '--port', '3080'])
   })
 })

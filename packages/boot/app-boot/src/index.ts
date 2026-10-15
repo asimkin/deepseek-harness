@@ -1124,6 +1124,17 @@ function startupDiagnostic(binName: string, failures: readonly InactiveEntry[], 
       lines.push(...failureDetail(outcome).split('\n').map(line => `    ${line}`))
     }
   }
+  if (failed.some(({ outcome }) => /EADDRINUSE/u.test(failureDetail(outcome)))) {
+    // A held TCP port means another instance of this command is already serving: this
+    // launch is a duplicate, not a broken installation. Say so, because the raw report
+    // reads like a damaged configuration and costs an investigation.
+    lines.push(
+      '',
+      'Hint: a required service could not bind its port because another process already holds it.',
+      'That is normally a duplicate launch of the same command (an instance is already running),',
+      'not a broken installation. Use the running instance, or start this one on a different port.',
+    )
+  }
   if (pending.length > 0) {
     const width = Math.max('Plugin'.length, ...pending.map(({ entry }) => label(entry).length)) + 2
     lines.push('', `Plugins waiting for services (${String(pending.length)}):`, `  ${'Plugin'.padEnd(width)}Missing services`)
