@@ -24,6 +24,8 @@ import { bwrapProfileArgs, landlockProfileArgs, seatbeltProfileArgs } from '../s
 
 const RO: SandboxPolicy = { mode: 'read-only', workspaceRoot: '/ws' }
 const WW: SandboxPolicy = { mode: 'workspace-write', workspaceRoot: '/ws' }
+/** Workspace-write plus a deployment root outside it — a separately mounted vault. */
+const WW_EXTRA: SandboxPolicy = { mode: 'workspace-write', workspaceRoot: '/ws', extraWritableRoots: ['/vault'] }
 
 /** Every temp dir created by this file (fake launchers and runner entries), removed after each test. */
 const tempDirs: string[] = []
@@ -92,6 +94,23 @@ describe('profile dialects', () => {
 
   it('landlock workspace-write: adds the host /tmp and the workspace root', () => {
     expect(landlockProfileArgs(WW)).toEqual(['--ro', '/', '--rw', '/dev/null', '--rw', '/tmp', '--rw', '/ws'])
+  })
+
+  it('bwrap workspace-write binds extra writable roots beside the workspace', () => {
+    expect(bwrapProfileArgs(WW_EXTRA)).toEqual([
+      '--ro-bind', '/', '/', '--dev', '/dev', '--unshare-pid', '--proc', '/proc', '--die-with-parent',
+      '--tmpfs', '/tmp', '--bind', '/ws', '/ws', '--bind', '/vault', '/vault',
+    ])
+  })
+
+  it('landlock workspace-write grants extra writable roots beside the workspace', () => {
+    expect(landlockProfileArgs(WW_EXTRA)).toEqual(['--ro', '/', '--rw', '/dev/null', '--rw', '/tmp', '--rw', '/ws', '--rw', '/vault'])
+  })
+
+  it('extra writable roots already covered by the workspace or a temp area are not bound twice', () => {
+    const policy: SandboxPolicy = { mode: 'workspace-write', workspaceRoot: '/ws', extraWritableRoots: ['/ws', '/tmp'] }
+    expect(bwrapProfileArgs(policy)).toEqual(bwrapProfileArgs(WW))
+    expect(landlockProfileArgs(policy)).toEqual(landlockProfileArgs(WW))
   })
 
   it('seatbelt read-only: allow-default with every file write denied except the /dev/null literal', () => {

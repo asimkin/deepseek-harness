@@ -4,9 +4,26 @@
  * @module @deepseek-ai/dsh-sandbox-local/profiles
  */
 
+import { tmpdir } from 'node:os'
 import { grantArgs as landlockGrantArgs } from '@deepseek-ai/node-addon-system/landlock-run'
-import { writableRoots } from '@deepseek-ai/dsh-sandbox'
+import { canonicalPath, writableRoots } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
+
+/**
+ * Roots the deployment added beside the workspace root and the platform temp
+ * areas, canonical and deduplicated. bwrap and Landlock grant those two in
+ * their own spellings (an ephemeral `/tmp` mount, a literal launcher grant),
+ * so only the extras need a mount/grant here; before this they were honoured
+ * by Seatbelt and the in-process fence alone, and a Linux confinement dropped
+ * them silently.
+ * @param policy - file-effect policy to derive the extra roots from.
+ * @returns canonical extra roots; empty without `extraWritableRoots`.
+ */
+function extraWritableRoots(policy: SandboxPolicy): string[] {
+  const workspace = canonicalPath(policy.workspaceRoot)
+  const tempAreas = new Set([canonicalPath('/tmp'), canonicalPath(tmpdir())])
+  return writableRoots(policy).filter(root => root !== workspace && !tempAreas.has(root))
+}
 
 /**
  * Build the bwrap profile arguments for one file-effect policy.
@@ -18,6 +35,7 @@ export function bwrapProfileArgs(policy: SandboxPolicy): string[] {
   if (policy.mode === 'workspace-write') {
     args.push('--tmpfs', '/tmp')
     args.push('--bind', policy.workspaceRoot, policy.workspaceRoot)
+    for (const root of extraWritableRoots(policy)) args.push('--bind', root, root)
   }
   return args
 }
@@ -30,7 +48,7 @@ export function bwrapProfileArgs(policy: SandboxPolicy): string[] {
 export function landlockProfileArgs(policy: SandboxPolicy): string[] {
   const readWrite = ['/dev/null']
   if (policy.mode === 'workspace-write') {
-    readWrite.push('/tmp', policy.workspaceRoot)
+    readWrite.push('/tmp', policy.workspaceRoot, ...extraWritableRoots(policy))
   }
   return landlockGrantArgs({ readOnly: ['/'], readWrite })
 }
