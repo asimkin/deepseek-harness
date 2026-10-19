@@ -19,6 +19,28 @@ import type {
 /** Default request-pressure fraction for every routed model. */
 const DEFAULT_THRESHOLD_RATIO = 0.8
 
+/**
+ * Deployment-wide override for {@link DEFAULT_THRESHOLD_RATIO}, read once per
+ * config resolution.
+ *
+ * Why an environment variable and not config: the plugin instance that actually
+ * runs is the one nested inside a profile's `compaction` group, and the home
+ * config layer cannot patch a group member — a same-id entry there lands on the
+ * disabled top-level registration instead, so the tuning silently does nothing.
+ * Without this knob the only way to compact earlier was to edit the bundle that
+ * declares the profile. Validated strictly so a typo fails loudly at startup
+ * rather than quietly restoring the default.
+ */
+function envThresholdRatio(): number | undefined {
+  const raw = process.env.DSH_COMPACT_THRESHOLD_RATIO
+  if (raw === undefined || raw.trim() === '') return undefined
+  const value = Number(raw)
+  if (!Number.isFinite(value) || value <= 0 || value >= 1) {
+    throw new Error(`BasicCompactionConfig: DSH_COMPACT_THRESHOLD_RATIO must be a ratio in (0, 1), got ${JSON.stringify(raw)}`)
+  }
+  return value
+}
+
 /** Default verbatim-tail fraction for every routed model. */
 const DEFAULT_RETAIN_RATIO = 0.16
 
@@ -75,7 +97,7 @@ export function resolveConfig(config: BasicCompactionConfig = {}): ResolvedConfi
   const headroomTokens = config.headroomTokens ?? 65_536
   const maxTokens = config.maxTokens ?? headroomTokens
   assertPositiveInteger('BasicCompactionConfig.maxTokens (explicit or from headroomTokens)', maxTokens)
-  const thresholdRatio = config.thresholdRatio ?? DEFAULT_THRESHOLD_RATIO
+  const thresholdRatio = config.thresholdRatio ?? envThresholdRatio() ?? DEFAULT_THRESHOLD_RATIO
   const retention = resolveRetention(config, { retainRatio: DEFAULT_RETAIN_RATIO })
   validateRatioRetention(thresholdRatio, retention, 'BasicCompactionConfig')
   const modelPolicies = resolveModelPolicies(config.modelPolicies)

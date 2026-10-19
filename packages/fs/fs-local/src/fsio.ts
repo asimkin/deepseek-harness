@@ -51,6 +51,23 @@ function isPermissionError(error: unknown): boolean {
   return error instanceof Error && 'code' in error && (error.code === 'EACCES' || error.code === 'EPERM')
 }
 
+/**
+ * Whether a failed hard link means "this filesystem cannot do hard links" rather
+ * than "the link was refused for a real reason".
+ *
+ * Cloud/FUSE mounts (rclone and friends) reject `link()` with EPERM even when the
+ * target does not exist, while `rename()` into the same directory works. Treating
+ * that as an ordinary IO error made the create-if-absent path unusable there: the
+ * observed symptom was `EPERM ... link` on every new file under `/mnt/o`.
+ * EACCES is deliberately absent — it means the parent directory denies writes, and
+ * a rename would fail the same way.
+ */
+function isHardLinkUnsupported(error: unknown): boolean {
+  return error instanceof Error && 'code' in error
+    && (error.code === 'EPERM' || error.code === 'ENOTSUP'
+      || error.code === 'EOPNOTSUPP' || error.code === 'EXDEV')
+}
+
 function throwIfAborted(signal: AbortSignal | undefined, verb: string): void {
   if (signal?.aborted) throw new FsError(`${verb} aborted`, 'FS_ABORTED')
 }
@@ -634,7 +651,21 @@ export async function writeFileAtomic(
       try {
         await linkFile(tempPath, absolutePath)
       } catch (error: unknown) {
-        await throwGuardedCreateFailure(error, absolutePath, createIfAbsent.displayPath, inspectPublicationTarget)
+        // A filesystem without hard links still supports rename into the same
+        // directory. Fall back only when the target is absent, so create-if-absent
+        // keeps its meaning: an existing file, or a real errno, goes through the
+        // guarded failure below and keeps its precise message.
+        let present = true
+        try {
+          await inspectPublicationTarget(absolutePath)
+        } catch (inspection: unknown) {
+          if (isENOENT(inspection) || isENOTDIR(inspection)) present = false
+        }
+        if (!present && isHardLinkUnsupported(error)) {
+          await rename(tempPath, absolutePath)
+        } else {
+          await throwGuardedCreateFailure(error, absolutePath, createIfAbsent.displayPath, inspectPublicationTarget)
+        }
       }
     } else if (platform === 'win32' && mode !== undefined) {
       try {

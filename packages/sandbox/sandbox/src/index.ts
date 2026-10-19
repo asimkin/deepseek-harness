@@ -43,6 +43,18 @@ export interface SandboxExecutionPolicy {
   /** Absolute root directory `workspace-write` may write under. */
   workspaceRoot: string
   /**
+   * Additional absolute roots `workspace-write` may write under, beside the
+   * workspace root and the platform temp areas.
+   *
+   * Needed for a deployment that must write into a fixed location outside the
+   * session workspace — a cloud-mounted knowledge vault, for instance. Without
+   * it the only choices were widening the whole session to
+   * `danger-full-access` or writing such files through `bash`, which silently
+   * reintroduced the "the write tool cannot, but the shell can" asymmetry the
+   * shared derivation in `roots.ts` exists to prevent.
+   */
+  extraWritableRoots?: readonly string[]
+  /**
    * Opaque identity of the calling session (the branded `dsh-session`
    * SessionId). Backends key per-session state off it (e.g. windows-acl gives
    * each live session/workspace pair a random private temp directory and SID,

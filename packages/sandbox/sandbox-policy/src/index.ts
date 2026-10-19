@@ -76,6 +76,14 @@ export interface Config {
    * `process.cwd()`). Normal agent calls use their session cwd instead.
    */
   workspaceRoot?: string
+  /**
+   * Additional absolute roots `workspace-write` may write under, beside the
+   * workspace root and the platform temp areas. For a deployment that must write
+   * into a fixed location outside the session workspace (a mounted knowledge
+   * vault), this grants exactly that path instead of switching the whole session
+   * to `danger-full-access`.
+   */
+  extraWritableRoots?: string[]
 }
 
 /** Inputs that select the sandbox policy for one capability call. */
@@ -114,6 +122,8 @@ export class SandboxPolicyService extends Service {
     // No schema default: process.cwd() is resolved in the constructor so the
     // stored root is always absolute regardless of how it was supplied.
     workspaceRoot: z.string(),
+    // Empty by default: a deployment opts in to writing outside the workspace.
+    extraWritableRoots: z.array(z.string()).default([]),
   })
 
   static inject = ['sessionProjections']
@@ -122,6 +132,8 @@ export class SandboxPolicyService extends Service {
   readonly defaultMode: SandboxMode
   /** The absolute `workspace-write` fallback root for calls without a session cwd. */
   readonly workspaceRoot: string
+  /** Additional absolute writable roots, already resolved absolute. */
+  readonly extraWritableRoots: readonly string[]
   constructor(ctx: Context, config: Config) {
     super(ctx, 'sandboxPolicy')
     // schemastery (static Config) already filled `mode`; the cast records that
@@ -129,6 +141,7 @@ export class SandboxPolicyService extends Service {
     // the process cwd is real branching, resolved absolute either way.
     this.defaultMode = config.mode as SandboxMode
     this.workspaceRoot = resolveWorkspaceRoot(config.workspaceRoot ?? process.cwd())
+    this.extraWritableRoots = (config.extraWritableRoots ?? []).map(root => resolveWorkspaceRoot(root))
 
     ctx.sessionProjections.register({
       key: 'sandboxMode',
@@ -166,6 +179,7 @@ export class SandboxPolicyService extends Service {
     return {
       mode: request.mode ?? (session === undefined ? undefined : this.overrideOf(session)) ?? this.defaultMode,
       workspaceRoot: resolveWorkspaceRoot(session?.header.cwd ?? this.workspaceRoot),
+      ...this.extraWritableRoots.length === 0 ? {} : { extraWritableRoots: this.extraWritableRoots },
       ...session === undefined ? {} : { sessionId: session.id },
     }
   }

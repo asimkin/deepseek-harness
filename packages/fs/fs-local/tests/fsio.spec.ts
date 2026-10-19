@@ -821,6 +821,33 @@ describe('writeFileAtomic — temp-file safety', () => {
     expect((await readdir(dir)).filter(name => name.includes('.tmp'))).toEqual([])
   })
 
+  it('falls back to rename when the filesystem refuses hard links', async () => {
+    // Cloud/FUSE mounts (rclone) reject link() with EPERM even for a fresh target,
+    // while rename() into the same directory works. Without the fallback the
+    // create-if-absent path was unusable there.
+    const file = join(dir, 'a.txt')
+    const refused = Object.assign(new Error('link refused by mount'), { code: 'EPERM' })
+
+    await writeFileAtomic(file, 'ours', undefined, undefined, {
+      linkFile: async () => { throw refused },
+    }, { displayPath: file })
+
+    expect(await readFile(file, 'utf8')).toBe('ours')
+    expect((await readdir(dir)).filter(name => name.includes('.tmp'))).toEqual([])
+  })
+
+  it('does not fall back to rename when the target already exists', async () => {
+    const file = join(dir, 'a.txt')
+    await writeFile(file, 'old')
+    const refused = Object.assign(new Error('link refused by mount'), { code: 'EPERM' })
+
+    await expect(writeFileAtomic(file, 'ours', undefined, undefined, {
+      linkFile: async () => { throw refused },
+    }, { displayPath: file })).rejects.toMatchObject({ code: 'FS_NOT_OBSERVED' })
+
+    expect(await readFile(file, 'utf8')).toBe('old')
+  })
+
   it('maps a non-collision guarded-create publication failure and cleans staging', async () => {
     const file = join(dir, 'a.txt')
     const denied = Object.assign(new Error('link denied'), { code: 'EACCES' })

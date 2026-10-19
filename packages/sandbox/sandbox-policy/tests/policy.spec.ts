@@ -15,7 +15,7 @@ import SandboxPolicyService, { SANDBOX_MODES, setSandboxMode } from '@deepseek-a
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt, { renderContextSnapshot, renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 
-async function mounted(config: { mode?: 'read-only' | 'workspace-write' | 'danger-full-access'; workspaceRoot?: string } = {}) {
+async function mounted(config: { mode?: 'read-only' | 'workspace-write' | 'danger-full-access'; workspaceRoot?: string; extraWritableRoots?: string[] } = {}) {
   const ctx = new Context()
   await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(SandboxPolicyService, config)
@@ -53,6 +53,34 @@ describe('SandboxPolicyService', () => {
     const ctx = await mounted({ mode: 'workspace-write', workspaceRoot: '/ws/../ws/./sub' })
     expect(ctx.sandboxPolicy.defaultMode).toBe('workspace-write')
     expect(ctx.sandboxPolicy.workspaceRoot).toBe('/ws/../ws/./sub')
+  })
+
+  it('carries the deployment’s extra writable roots into the resolved policy', async () => {
+    const ctx = await mounted({
+      mode: 'workspace-write',
+      workspaceRoot: '/ws',
+      extraWritableRoots: ['/mnt/o/knowledges'],
+    })
+    expect(ctx.sandboxPolicy.resolve()).toMatchObject({ extraWritableRoots: ['/mnt/o/knowledges'] })
+  })
+
+  it('omits extra writable roots when the deployment named none', async () => {
+    const ctx = await mounted({ mode: 'workspace-write', workspaceRoot: '/ws' })
+    expect(ctx.sandboxPolicy.resolve()).not.toHaveProperty('extraWritableRoots')
+  })
+
+  it('rejects a relative extra writable root at load', async () => {
+    const ctx = new Context()
+    try {
+      await ctx.plugin(SessionProjectionRegistry)
+      await expect(ctx.plugin(SandboxPolicyService, {
+        mode: 'workspace-write',
+        workspaceRoot: '/ws',
+        extraWritableRoots: ['relative/vault'],
+      })).rejects.toThrow('sandbox-policy: workspace root must be an absolute execution-world path')
+    } finally {
+      await ctx.fiber.dispose()
+    }
   })
 
   it('rejects a relative deployment workspace root at load', async () => {

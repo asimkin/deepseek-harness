@@ -1,4 +1,4 @@
-import { describe, expect, expectTypeOf, it, vi } from 'vitest'
+import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import BasicCompactionEngine from '@deepseek-ai/dsh-compaction-basic'
@@ -307,7 +307,33 @@ async function compactIfNeeded(
 }
 
 describe('compact configuration and defaults', () => {
+  // The threshold env override would otherwise make these assertions depend on
+  // the developer's shell; each env test below restores it itself.
+  const savedThresholdEnv = process.env.DSH_COMPACT_THRESHOLD_RATIO
+  afterEach(() => {
+    if (savedThresholdEnv === undefined) delete process.env.DSH_COMPACT_THRESHOLD_RATIO
+    else process.env.DSH_COMPACT_THRESHOLD_RATIO = savedThresholdEnv
+  })
+
+  it('takes the threshold from the environment when config names none', () => {
+    process.env.DSH_COMPACT_THRESHOLD_RATIO = '0.2'
+    expect(resolveConfig({}).thresholdRatio).toBe(0.2)
+  })
+
+  it('lets explicit config outrank the environment', () => {
+    process.env.DSH_COMPACT_THRESHOLD_RATIO = '0.2'
+    expect(resolveConfig({ thresholdRatio: 0.6 }).thresholdRatio).toBe(0.6)
+  })
+
+  it('rejects an unusable threshold from the environment instead of silently defaulting', () => {
+    for (const bad of ['0', '1', '1.5', 'abc']) {
+      process.env.DSH_COMPACT_THRESHOLD_RATIO = bad
+      expect(() => resolveConfig({})).toThrow(/DSH_COMPACT_THRESHOLD_RATIO must be a ratio in \(0, 1\)/)
+    }
+  })
+
   it('uses low-friction service-wide defaults', () => {
+    delete process.env.DSH_COMPACT_THRESHOLD_RATIO
     const resolved = resolveConfig({})
 
     expect(resolved).toEqual({
