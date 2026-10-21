@@ -13,7 +13,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { ToolExecution } from '@deepseek-ai/dsh-tools'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
-import { ESCALATION_TARGETS, approveEscalation, escalationHintMarker, sandboxDenialMarker, sandboxPermissionsDescription, validateEscalationArgs } from '@deepseek-ai/dsh-sandbox'
+import { ESCALATION_TARGETS, WIDER_MODES, approveEscalation, escalationHintMarker, sandboxDenialMarker, sandboxPermissionsDescription, validateEscalationArgs } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
 import { FsError } from '@deepseek-ai/dsh-fs'
 
@@ -85,8 +85,20 @@ export class FsSandboxController {
    *   unsandboxed backend.
    */
   async resolvePolicy(toolName: string, args: FsEscalationArgs, exec: ToolExecution): Promise<SandboxExecutionPolicy | undefined> {
-    validateEscalationArgs(args.sandbox_permissions, args.justification)
     const standingPolicy = this.policy?.resolve({ ...exec.agent ? { session: exec.agent.session } : {} })
+    // An escalation field that cannot widen the standing mode — the same mode
+    // repeated or a request against an already-wider standing mode — is a no-op
+    // ask, not an error: run under the standing policy instead of failing the
+    // round (and paying for a re-emitted document). Only a strictly wider target
+    // enters validation and approval below.
+    if (
+      args.sandbox_permissions !== undefined
+      && standingPolicy !== undefined
+      && !(WIDER_MODES[standingPolicy.mode] ?? []).includes(args.sandbox_permissions as SandboxMode)
+    ) {
+      return standingPolicy
+    }
+    validateEscalationArgs(args.sandbox_permissions, args.justification)
     if (args.sandbox_permissions === undefined || args.justification === undefined) {
       return standingPolicy
     }
