@@ -113,6 +113,14 @@ export interface PiAiAdapterOptions {
    * conversion because its stored replay state is unusable by this build.
    */
   onReplayDegrade?: (detail: { provider: string; model: string; reason: string }) => void
+  /**
+   * Observe the upstream request id of one streaming call. The corporate proxy
+   * answers with `x-server-request-id`, and that id is the only key its
+   * server-side logs are searchable by — without it a disputed charge cannot be
+   * pinned to a session, a model or a caller. Optional: a route whose transport
+   * reports no such header simply never calls it.
+   */
+  onUpstreamRequestId?: (detail: { provider: string; model: string; requestId: string }) => void
 }
 
 /** The two auth injectables a pi-ai collection is built with. */
@@ -228,11 +236,31 @@ function requestHeaders(headers: Readonly<Record<string, string>> | undefined): 
  * profiles, so a configuration change reaches the next request without a
  * restart; model descriptors come from the collection those profiles built.
  */
+/**
+ * Read one header out of pi-ai's provider response snapshot. The proxy sends
+ * lowercase names, but the map is provider-supplied, so match case-insensitively.
+ */
+function headerValue(headers: Readonly<Record<string, string>>, name: string): string | undefined {
+  const wanted = name.toLowerCase()
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === wanted && value !== '') return value
+  }
+  return undefined
+}
+
 export class PiAiAdapter extends LlmAdapter {
   private snapshot: PiAiSnapshot | undefined
 
   constructor(private readonly config: PiAiAdapterOptions) {
     super()
+  }
+
+  /** Forward one response's request id to the deployment sink, when it has one. */
+  private reportRequestId(headers: Readonly<Record<string, string>>, provider: string, model: string): void {
+    const observe = this.config.onUpstreamRequestId
+    if (observe === undefined) return
+    const requestId = headerValue(headers, 'x-server-request-id')
+    if (requestId !== undefined) observe({ provider, model, requestId })
   }
 
   override imageRequestTarget(provider: string, model: string, image: ImageAttachmentRef) {
@@ -422,6 +450,10 @@ export class PiAiAdapter extends LlmAdapter {
         // Profile headers are deployment-owned; attribution names are
         // Harness-owned and therefore win collisions.
         headers: requestHeaders(profile.headers),
+        // pi-ai reports every HTTP response here, headers included: the only
+        // seam that sees `x-server-request-id`, which is the proxy's lookup key
+        // for its server-side request log.
+        onResponse: response => this.reportRequestId(response.headers, options.provider, options.model),
       })
       const iterator = toStreamChunks(events, model.contextWindow, options.signal, model.id)[Symbol.asyncIterator]()
       let exhausted = false

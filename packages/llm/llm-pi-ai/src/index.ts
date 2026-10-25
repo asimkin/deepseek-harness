@@ -224,6 +224,16 @@ export function apply(ctx: Context, config: Config): void {
       hostPath => ctx.get('fs')?.processPathFromHostPath(hostPath),
       ref,
     ),
+    // The proxy's x-server-request-id is the only handle on its server-side
+    // request logs, so every call records it next to the route that made it.
+    // Written to stderr rather than ctx.logger: no console logger exporter is
+    // mounted in these profiles, so logger output goes nowhere, while stderr
+    // reaches the journal the service runs under (`dsh-web logs`).
+    onUpstreamRequestId: ({ provider, model, requestId }) => {
+      process.stderr.write(
+        `llm-pi-ai: route "${provider}/${model}" upstream x-server-request-id=${requestId}\n`,
+      )
+    },
     onReplayDegrade: ({ provider, model, reason }) => {
       ctx.logger.warn(
         `llm-pi-ai: unusable replay state on assistant history for route "${provider}/${model}";`
