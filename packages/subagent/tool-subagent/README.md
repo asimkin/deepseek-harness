@@ -69,7 +69,9 @@ Set `agentPreset` to give every child an independent preset by default. Set `all
 
 The configured default and allowlist must name declared presets. A tool inside a preset checks these ids and reads their descriptions during Agent initialization; a Host-mounted tool performs this check when it loads. This check does not activate candidate presets. Activation failures reject the selected preset when the child is composed. Without either selection field, the tool does not require the preset service. An omitted model choice uses the configured `agentPreset`, or joins the parent's current preset revision when no default is configured. Any explicit id mounts the currently available revision, even when it matches the parent's id.
 
-Compose persona and tools in the [preset plugin list](../../preset/agent-preset-registry/README.md). Tool configuration containing `persona` or `toolFilter` fails at load with a migration error. Local children use the shared [preset restoration rules](../subagent/README.md#restoring-child-composition).
+Compose persona and tools in the [preset plugin list](../../preset/agent-preset-registry/README.md). Tool configuration containing `persona` fails at load with a migration error: a preset owns it. Local children use the shared [preset restoration rules](../subagent/README.md#restoring-child-composition).
+
+`toolFilter: { allow, deny }` narrows which tools a child can see. It is independent of the preset because a child inherits the parent's whole toolscape: a preset that declares only `tool-fs` still sees the parent's shell, mutation, subagent and MCP tools, and `disabled: true` rows inside a preset do not remove them (measured 2026-10-25: 105 tools, 93 KB of schema, with and without such rows). `allow` keeps exactly the named model-facing tools and removes the rest, which is what makes a read-only role actually read-only and cuts the child's tool schema from ~28k to under 1k tokens per request. It requires the provider's `toolFilter` capability — in-process spawn only.
 
 ### Selecting a child LLM
 

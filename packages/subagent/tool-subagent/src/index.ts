@@ -65,6 +65,14 @@ export interface Config extends PresetSelectionConfig {
    */
   agentOptions?: AgentOptions
   /**
+   * Model-facing tool names the child keeps (`allow`) or must not see (`deny`).
+   * A read-only delegation passes an `allow` list of the few tools it needs, so
+   * the child's prompt carries a short tool schema instead of the parent's full
+   * catalog, and a read-only role cannot reach mutation, shell or MCP tools.
+   * Requires the provider's `toolFilter` capability (in-process spawn only).
+   */
+  toolFilter?: { allow?: string[]; deny?: string[] }
+  /**
    * Maximum child depth: a non-negative safe integer (`0` forbids delegation),
    * or `'provider-managed'` to send no cap. A numeric cap
    * requires the provider's `depthLimit` capability (mount fails loud
@@ -94,6 +102,12 @@ export const Config: z<Config> = z.object({
     maxTokens: number
   }),
   agentPreset: z.string().min(1),
+  // Both halves optional, but an empty object means "show nothing" by accident,
+  // so the schema demands at least one non-empty list.
+  toolFilter: z.object({
+    allow: z.array(z.string().min(1)).default(undefined as unknown as string[]),
+    deny: z.array(z.string().min(1)).default(undefined as unknown as string[]),
+  }).default(undefined as unknown as { allow?: string[]; deny?: string[] }),
   allowedAgentPresets: (z.array(z.string().min(1)).min(1) as z<string[] | undefined>).default(undefined),
   maxDepth: z.union([z.natural().max(Number.MAX_SAFE_INTEGER), z.const('provider-managed' as const)]),
 })
@@ -144,10 +158,16 @@ function providerWording(inheritsConversation: boolean): { description: string; 
  * @param session - unpublished Session supplied by a direct Agent setup; omit for a standing composition.
  */
 export async function apply(ctx: Context, config: Config, session?: Session): Promise<void> {
-  for (const field of ['persona', 'toolFilter']) {
-    if (Object.hasOwn(config, field)) {
-      throw new Error(`tool-subagent: ${field} is no longer supported; configure persona and tool plugins in an Agent Preset and select it with agentPreset (spawn only)`)
-    }
+  if (Object.hasOwn(config, 'persona')) {
+    throw new Error('tool-subagent: persona is no longer supported; configure persona in an Agent Preset and select it with agentPreset (spawn only)')
+  }
+  const toolFilter = config.toolFilter
+  if (
+    toolFilter !== undefined
+    && (toolFilter.allow?.length ?? 0) === 0
+    && (toolFilter.deny?.length ?? 0) === 0
+  ) {
+    throw new Error('tool-subagent: toolFilter must declare a non-empty allow and/or deny list')
   }
   const presets = new SubagentPresetSelection(config)
   if (presets.configured && ctx.get('agentPresets') === undefined) {
@@ -167,6 +187,11 @@ export async function apply(ctx: Context, config: Config, session?: Session): Pr
       throw new Error(
         `tool-subagent: provider "${subagentProvider.name}" cannot enforce maxDepth (no depthLimit capability) — `
         + 'set maxDepth: \'provider-managed\' to leave the recursion budget to the provider',
+      )
+    }
+    if (toolFilter !== undefined && subagentProvider.capabilities.toolFilter !== true) {
+      throw new Error(
+        `tool-subagent: provider "${subagentProvider.name}" cannot restrict the child's tools (no toolFilter capability)`,
       )
     }
     if (config.agentOptions !== undefined && !subagentProvider.capabilities.agentOptions) {
@@ -323,6 +348,7 @@ export async function apply(ctx: Context, config: Config, session?: Session): Pr
             prompt: [{ type: 'text', text: args.prompt }] as ContentBlock[],
             parent,
             ...agentPreset === undefined ? {} : { agentPreset },
+            ...toolFilter === undefined ? {} : { toolFilter },
             ...requestedChildAgentOptions !== undefined ? { agentOptions: requestedChildAgentOptions } : {},
             ...maxDepth !== undefined ? { maxDepth } : {},
           }

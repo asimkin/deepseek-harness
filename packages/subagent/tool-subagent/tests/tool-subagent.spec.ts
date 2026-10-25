@@ -625,14 +625,33 @@ describe('dsh-tool-subagent', () => {
     })).rejects.toThrow('subagent maxDepth must be a non-negative safe integer')
   })
 
-  it.each([
-    { persona: 'Child persona' },
-    { toolFilter: { deny: ['subagent'] } },
-    { toolFilter: {} },
-    { persona: undefined },
-  ])('rejects removed composition configuration at plugin load: %j', async (removed) => {
-    await expect(setup({ provider: 'mock', ...removed }))
-      .rejects.toThrow(/no longer supported; configure persona and tool plugins in an Agent Preset/)
+  it('rejects a persona at plugin load: it belongs to the Agent Preset', async () => {
+    // The field is gone from Config, so a legacy deployment reaches apply()
+    // through YAML: cast the object the same way an untyped loader would.
+    const legacy = { provider: 'mock', persona: 'Child persona' } as unknown as Parameters<typeof setup>[0]
+    await expect(setup(legacy))
+      .rejects.toThrow('tool-subagent: persona is no longer supported; configure persona in an Agent Preset')
+  })
+
+  it('rejects toolFilter when the provider cannot restrict child tools', async () => {
+    await expect(setup({ provider: 'mock', toolFilter: { deny: ['subagent'] } }))
+      .rejects.toThrow('cannot restrict the child\'s tools (no toolFilter capability)')
+  })
+
+  it('rejects a toolFilter that names neither side', async () => {
+    await expect(setup({ provider: 'mock', toolFilter: {} }))
+      .rejects.toThrow('tool-subagent: toolFilter must declare a non-empty allow and/or deny list')
+  })
+
+  it('forwards toolFilter to a provider that supports it', async () => {
+    const seen: SubagentStartRequest[] = []
+    const ctx = await setup(
+      { provider: 'mock', toolFilter: { allow: ['read', 'grep'] } },
+      { capabilities: { toolFilter: true }, onStart: (request) => { seen.push(request) } },
+    )
+    const result = await callSubagent(ctx, { description: 'read-only review', prompt: 'go' })
+    expect(result.isError).toBe(false)
+    expect(seen[0]?.toolFilter).toEqual({ allow: ['read', 'grep'] })
   })
 
   it('an omitted agentOptions does not materialize an empty object onto the request', async () => {
